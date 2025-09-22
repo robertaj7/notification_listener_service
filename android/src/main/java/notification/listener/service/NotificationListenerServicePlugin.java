@@ -12,6 +12,7 @@ import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
 import android.content.ActivityNotFoundException;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
@@ -26,6 +27,8 @@ import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry;
 import notification.listener.service.models.Action;
 import notification.listener.service.models.ActionCache;
+import notification.listener.service.models.NotificationCache;
+
 import android.annotation.SuppressLint;
 import android.os.Build;
 
@@ -92,8 +95,25 @@ public class NotificationListenerServicePlugin implements FlutterPlugin, Activit
             } else {
                 result.error("ServiceUnavailable", "NotificationService not running", null);
             }
-        }
-        else {
+        } else if (call.method.equals("click")) {
+            final int notificationId = call.argument("notificationId");
+            final PendingIntent pendingIntent = NotificationCache.cachedIntents.get(notificationId);
+
+            if (pendingIntent != null) {
+                try {
+                    pendingIntent.send();
+                    result.success(true);
+                } catch (PendingIntent.CanceledException e) {
+                    result.error("CANCELED", "PendingIntent was canceled", null);
+                }
+            } else {
+                result.error("Notification", "Can't find this cached notification", null);
+            }
+        } else if (call.method.equals("clearNotification")) {
+            final String notificationKey = call.argument("notificationKey");
+            NotificationListener service = NotificationListener.getInstance();
+            service.cancelNotification(notificationKey);
+        } else {
             result.notImplemented();
         }
     }
@@ -124,19 +144,21 @@ public class NotificationListenerServicePlugin implements FlutterPlugin, Activit
     public void onDetachedFromActivity() {
         this.mActivity = null;
     }
+
     @SuppressLint("WrongConstant")
     @Override
     public void onListen(Object arguments, EventChannel.EventSink events) {
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(NotificationConstants.INTENT);
-        notificationReceiver = new NotificationReceiver(events);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            context.registerReceiver(notificationReceiver, intentFilter, Context.RECEIVER_EXPORTED);
-        }else{
-            context.registerReceiver(notificationReceiver, intentFilter);
+        if (notificationReceiver == null) {
+            notificationReceiver = new NotificationReceiver(events);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                context.registerReceiver(notificationReceiver, intentFilter, Context.RECEIVER_EXPORTED);
+            } else {
+                context.registerReceiver(notificationReceiver, intentFilter);
+            }
         }
-        Intent listenerIntent = new Intent(context, NotificationReceiver.class);
-        context.startService(listenerIntent);
+
         Log.i("NotificationPlugin", "Started the notifications tracking service.");
     }
 

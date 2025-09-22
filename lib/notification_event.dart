@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'notification_listener_service.dart';
@@ -5,6 +6,8 @@ import 'notification_listener_service.dart';
 class ServiceNotificationEvent {
   /// the notification id
   int? id;
+
+  String? key;
 
   /// check if we can reply the Notification
   bool? canReply;
@@ -48,11 +51,23 @@ class ServiceNotificationEvent {
   /// ```
   Uint8List? largeIcon;
 
+  /// the notification small icon
+  /// To display an image simply use the [Image.memory] widget.
+  /// Example:
+  ///
+  /// ```
+  /// Image.memory(notif.largeIcon)
+  /// ```
+  Uint8List? smallIcon;
+
   /// the content of the notification
   String? content;
 
+  int? postTime;
+
   ServiceNotificationEvent({
     this.id,
+    this.key,
     this.canReply,
     this.haveExtraPicture,
     this.hasRemoved,
@@ -61,11 +76,14 @@ class ServiceNotificationEvent {
     this.title,
     this.appIcon,
     this.largeIcon,
+    this.smallIcon,
     this.content,
+    this.postTime
   });
 
   ServiceNotificationEvent.fromMap(Map<dynamic, dynamic> map) {
     id = map['id'];
+    key = map['key'];
     canReply = map['canReply'];
     haveExtraPicture = map['haveExtraPicture'];
     hasRemoved = map['hasRemoved'];
@@ -74,7 +92,9 @@ class ServiceNotificationEvent {
     title = map['title'];
     appIcon = map['appIcon'];
     largeIcon = map['largeIcon'];
+    smallIcon = map['smallIcon'];
     content = map['content'];
+    postTime = map['postTime'];
   }
 
   /// send a direct message reply to the incoming notification
@@ -91,16 +111,38 @@ class ServiceNotificationEvent {
     }
   }
 
+  Future<bool> click() async {
+    try {
+      return await methodeChannel.invokeMethod<bool>("click", {
+            'notificationId': id,
+          }) ??
+          false;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<bool> dismiss() async {
+    try {
+      return await methodeChannel.invokeMethod<bool>("clearNotification", {
+            'notificationKey': key,
+          }) ??
+          false;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   @override
   String toString() {
     return '''ServiceNotificationEvent(
       id: $id
-      can reply: $canReply
+      key: $key
       packageName: $packageName
       title: $title
       content: $content
       hasRemoved: $hasRemoved
-      haveExtraPicture: $haveExtraPicture
+      smallIcon: ${smallIcon != null ? 'Available' : 'Not available'}
       ''';
   }
 }

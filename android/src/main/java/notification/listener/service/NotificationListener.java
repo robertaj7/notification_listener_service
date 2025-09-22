@@ -5,10 +5,12 @@ import static notification.listener.service.models.ActionCache.cachedNotificatio
 
 import android.annotation.SuppressLint;
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
@@ -18,6 +20,7 @@ import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
+
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
@@ -28,6 +31,7 @@ import androidx.annotation.RequiresApi;
 import java.io.ByteArrayOutputStream;
 
 import notification.listener.service.models.Action;
+import notification.listener.service.models.NotificationCache;
 
 
 @SuppressLint("OverrideAbstract")
@@ -48,6 +52,7 @@ public class NotificationListener extends NotificationListenerService {
     @RequiresApi(api = VERSION_CODES.KITKAT)
     @Override
     public void onNotificationPosted(StatusBarNotification notification) {
+        Log.d("NotificationListener", "Notification Posted: " + notification.getPackageName() + " - " + notification.getId());
         handleNotification(notification, false);
     }
 
@@ -57,29 +62,41 @@ public class NotificationListener extends NotificationListenerService {
         handleNotification(sbn, true);
     }
 
-    @RequiresApi(api = VERSION_CODES.KITKAT)
+    @RequiresApi(api = VERSION_CODES.KITKAT_WATCH)
     private void handleNotification(StatusBarNotification notification, boolean isRemoved) {
         String packageName = notification.getPackageName();
         Bundle extras = notification.getNotification().extras;
         byte[] appIcon = getAppIcon(packageName);
         byte[] largeIcon = null;
+        byte[] smallIcon = null;
         Action action = NotificationUtils.getQuickReplyAction(notification.getNotification(), packageName);
 
         if (Build.VERSION.SDK_INT >= VERSION_CODES.M) {
             largeIcon = getNotificationLargeIcon(getApplicationContext(), notification.getNotification());
         }
+        if (Build.VERSION.SDK_INT >= VERSION_CODES.M) {
+            smallIcon = getNotificationSmallIcon(getApplicationContext(), notification.getNotification());
+        }
 
         Intent intent = new Intent(NotificationConstants.INTENT);
         intent.putExtra(NotificationConstants.PACKAGE_NAME, packageName);
         intent.putExtra(NotificationConstants.ID, notification.getId());
+        intent.putExtra(NotificationConstants.KEY, notification.getKey());
         intent.putExtra(NotificationConstants.CAN_REPLY, action != null);
+        intent.putExtra(NotificationConstants.POST_TIME, notification.getPostTime());
 
         if (NotificationUtils.getQuickReplyAction(notification.getNotification(), packageName) != null) {
             cachedNotifications.put(notification.getId(), action);
         }
 
+        PendingIntent clickIntent = notification.getNotification().contentIntent;
+        if (clickIntent != null) {
+            NotificationCache.cachedIntents.put(notification.getId(), clickIntent);
+        }
+
         intent.putExtra(NotificationConstants.NOTIFICATIONS_ICON, appIcon);
         intent.putExtra(NotificationConstants.NOTIFICATIONS_LARGE_ICON, largeIcon);
+        intent.putExtra(NotificationConstants.NOTIFICATIONS_SMALL_ICON, smallIcon);
 
         if (extras != null) {
             CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
@@ -101,6 +118,8 @@ public class NotificationListener extends NotificationListenerService {
                 }
             }
         }
+
+        Log.d("NotificationCheck", "Broadcasting intent for package: " + packageName + ", id: " + notification.getId() + ", key: " + notification.getKey() + ", extras: " + (extras != null));
         sendBroadcast(intent);
     }
 
@@ -123,13 +142,16 @@ public class NotificationListener extends NotificationListenerService {
         try {
             Icon largeIcon = notification.getLargeIcon();
             if (largeIcon == null) {
+                Log.d("NotificationListener", "Large icon is null");
                 return null;
             }
             Drawable iconDrawable = largeIcon.loadDrawable(context);
-            Bitmap iconBitmap = ((BitmapDrawable) iconDrawable).getBitmap();
+            Bitmap iconBitmap = drawableToBitmap(iconDrawable);
+
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             iconBitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
 
+            Log.d("NotificationListener", "Large Icon retrieved successfully");
             return outputStream.toByteArray();
         } catch (Exception e) {
             e.printStackTrace();
@@ -138,7 +160,45 @@ public class NotificationListener extends NotificationListenerService {
         }
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    @RequiresApi(api = VERSION_CODES.M)
+    private byte[] getNotificationSmallIcon(Context context, Notification notification) {
+        try {
+            Icon smallIcon = notification.getSmallIcon();
+            if (smallIcon == null) {
+                Log.d("NotificationListener", "Small icon is null");
+                return null;
+            }
+            Drawable iconDrawable = smallIcon.loadDrawable(context);
+            Bitmap iconBitmap = drawableToBitmap(iconDrawable);
+
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            iconBitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
+
+            Log.d("NotificationListener", "Small Icon retrieved successfully");
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Log.e("ERROR SMALL ICON", "getNotificationSmallIcon: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private Bitmap drawableToBitmap(Drawable drawable) {
+        if (drawable instanceof BitmapDrawable) {
+            return ((BitmapDrawable) drawable).getBitmap();
+        }
+
+        int width = drawable.getIntrinsicWidth() > 0 ? drawable.getIntrinsicWidth() : 1;
+        int height = drawable.getIntrinsicHeight() > 0 ? drawable.getIntrinsicHeight() : 1;
+
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+        drawable.draw(canvas);
+        return bitmap;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.M)
     public List<Map<String, Object>> getActiveNotificationData() {
         List<Map<String, Object>> notificationList = new ArrayList<>();
         StatusBarNotification[] activeNotifications = getActiveNotifications();
@@ -149,6 +209,7 @@ public class NotificationListener extends NotificationListenerService {
             Bundle extras = notification.extras;
 
             notifData.put("id", sbn.getId());
+            notifData.put("key", sbn.getKey());
             notifData.put("packageName", sbn.getPackageName());
             notifData.put("title", extras.getCharSequence(Notification.EXTRA_TITLE) != null
                     ? extras.getCharSequence(Notification.EXTRA_TITLE).toString()
